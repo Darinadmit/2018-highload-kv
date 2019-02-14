@@ -34,6 +34,7 @@ public final class Server {
 
     public static void main(String[] args) throws IOException {
         // Temporary storage in the file system
+
         final File data = Files.createTempDirectory();
 
         // Start the storage
