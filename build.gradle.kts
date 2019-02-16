@@ -24,6 +24,9 @@ dependencies {
     //MapDB
     compile("org.mapdb:mapdb:3.0.5")
 
+    //SLF4J
+    compile("org.slf4j:slf4j-simple:1.6.1");
+
     //One-nio
     compile("ru.odnoklassniki:one-nio:1.0.2")
 }

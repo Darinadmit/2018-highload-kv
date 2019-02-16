@@ -5,7 +5,6 @@ import org.mapdb.DB;
 import org.mapdb.DBMaker;
 import org.mapdb.HTreeMap;
 import org.mapdb.Serializer;
-import org.mapdb.serializer.SerializerArrayTuple;
 import ru.mail.polis.KVDao;
 
 import java.io.File;
@@ -23,9 +22,10 @@ public class KVDaoImpl implements KVDao {
 
     /**
      * Инициализирует хранилище
+     *
      * @param data - локальная папка для хранения данных
      */
-    public KVDaoImpl(File data){
+    public KVDaoImpl(File data) {
         File dataBase = new File(data, "dataBase");
         Serializer<Value> serializer = new CustomSerializer();
         this.db = DBMaker
@@ -53,7 +53,7 @@ public class KVDaoImpl implements KVDao {
     public byte[] get(@NotNull byte[] key) throws NoSuchElementException, IllegalStateException {
         Value value = internalGet(key);
 
-        if(value.getState() == Value.State.ABSENT || value.getState() == Value.State.REMOVED){
+        if (value.getState() == Value.State.ABSENT || value.getState() == Value.State.REMOVED) {
             throw new NoSuchElementException();
         }
         return value.getData();
@@ -62,7 +62,7 @@ public class KVDaoImpl implements KVDao {
     @NotNull
     public Value internalGet(@NotNull byte[] key) {
         Value value = storage.get(key);
-        if (value == null){
+        if (value == null) {
             return new Value(new byte[]{}, 0, Value.State.ABSENT);
         }
         return value;
@@ -72,13 +72,12 @@ public class KVDaoImpl implements KVDao {
      * Метод добавляет в хранилище значение {@code value} если ключ {@code key}
      * не найден, иначе обновляет значение.
      *
-     * @param key ключ для поиска
+     * @param key   ключ для поиска
      * @param value значение для вставки/обновления
      */
     @Override
     public void upsert(@NotNull byte[] key, @NotNull byte[] value) {
-        Value upsertValue = new Value(value, System.nanoTime(), Value.State.PRESENT);
-        storage.put(key, upsertValue);
+        storage.put(key, new Value(value, System.currentTimeMillis(), Value.State.PRESENT));
     }
 
     /**
@@ -88,8 +87,7 @@ public class KVDaoImpl implements KVDao {
      */
     @Override
     public void remove(@NotNull byte[] key) {
-        //storage.remove(key);
-        storage.put(key, new Value(new byte[]{}, System.nanoTime(), Value.State.REMOVED));
+        storage.put(key, new Value(new byte[]{}, System.currentTimeMillis(), Value.State.REMOVED));
     }
 
     /**
