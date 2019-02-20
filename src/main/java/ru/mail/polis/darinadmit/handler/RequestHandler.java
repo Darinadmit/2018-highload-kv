@@ -12,13 +12,15 @@ import ru.mail.polis.darinadmit.KVDaoImpl;
 import ru.mail.polis.darinadmit.RF;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.NoSuchElementException;
+import java.util.concurrent.*;
 
 /**
  * Шаблон для обработчика запросов
  */
 public abstract class RequestHandler {
-    final String methodName;
+    private final String methodName;
     @NotNull
     final KVDaoImpl dao;
     @NotNull
@@ -33,10 +35,10 @@ public abstract class RequestHandler {
 
     /**
      * @param methodName название обрабатываемого метода
-     * @param dao хранилище данных
-     * @param rf replica factor
-     * @param id ключ
-     * @param value значение; может быть null и применяется только для обработки метода PUT
+     * @param dao        хранилище данных
+     * @param rf         replica factor
+     * @param id         ключ
+     * @param value      значение; может быть null и применяется только для обработки метода PUT
      */
     RequestHandler(String methodName, @NotNull KVDao dao, @NotNull RF rf, String id, byte[] value) {
         this.methodName = methodName;
@@ -57,24 +59,40 @@ public abstract class RequestHandler {
     /**
      * Обработка запроса если proxied == false, но обработка выполняется для проксируемой ноды
      *
-     * @return true если не было исключений и все условия успешности запроса соблюдены
+     * @return Callable содержащий true, если не было исключений и все условия успешности запроса соблюдены
      * @throws IOException в случае внутрненних ошибок
      */
-    public abstract boolean ifMe() throws IOException;
+    public abstract Callable<Boolean> ifMe() throws IOException;
 
     /**
      * Обработка запроса если proxied == false и обработка проводится на другой ноде
      *
      * @param client нода, на которой должна проводится обработка
-     * @return true если не было исключений и все условия успешности запроса соблюдены
-     * @throws InterruptedException ошибка при запросе на клиент
-     * @throws PoolException ошмбка при запросе на клиент
-     * @throws HttpException ошибка при запросе на клиент
-     * @throws IOException внутреннаяя ошибка на сервере
-     * @throws NoSuchElementException возвращает метод GET, если данные были удалены
+     * @return Callable содержащий true, если не было исключений и все условия успешности запроса соблюдены
+     * <p>Callable может содержать следующий исключения <ol>
+     * <li>InterruptedException   ошибка при запросе на клиент</li>
+     * <li>PoolException          ошмбка при запросе на клиент</li>
+     * <li>HttpException          ошибка при запросе на клиент</li>
+     * <li>IOException            внутреннаяя ошибка на сервере</li>
+     * <li>NoSuchElementException возвращает метод GET, если данные были удалены</li>
+     * </ol>
      */
-    public abstract boolean ifNotMe(HttpClient client) throws InterruptedException, PoolException, HttpException, IOException, NoSuchElementException;
+    public abstract Callable<Boolean> ifNotMe(HttpClient client);
+
+    /**
+     * Ответ на запрос при удачном выполнении, если ответили хотя бы ack из from реплик
+     *
+     * @param acks количество ответивших реплик
+     * @return ответ на полученный запрос
+     */
     abstract Response onSuccess(int acks);
+
+    /**
+     * Ответ на запрос при неудачном выполнении, если числов ответивших реплик ack меньше чем заданное число from
+     *
+     * @param acks количество ответивших реплик
+     * @return ответ на полученный запрос
+     */
     abstract Response onFail(int acks);
 
     /**
@@ -82,22 +100,48 @@ public abstract class RequestHandler {
      * В случае успеха вызывает {@code onSuccess(int acks)} <p>
      * В случае провала вызывает {@code onFail(int acks)}
      *
-     * @param acks набранное количество ack
+     * @param futures список будущих ack
      * @return ответ на полученный запрос
      */
-    public Response getResponse(int acks){
-        if(acks >= rf.getAck()){
-            return onSuccess(acks);
-        } else {
-            return onFail(acks);
+    public Response getResponse(ArrayList<Future<Boolean>> futures) {
+        int acks = 0;
+
+        for (Future<Boolean> future : futures) {
+            try {
+                if (future.get()) {
+                    acks++;
+                    if (acks >= rf.getAck()) {
+                        return onSuccess(acks);
+                    }
+                }
+            } catch (ExecutionException | InterruptedException e) {
+                log.error(e.getMessage(), e);
+            }
         }
+
+        return onFail(acks);
     }
 
-    Response gatewayTimeout(int acks){
+    /**
+     * Шаблон, формирующий ответ на запрос при его неудачном выполнении
+     *
+     * @param acks количество ответивших реплик
+     * @return ответ на полученный запрос
+     */
+    Response gatewayTimeout(int acks) {
         log.info("Операция " + methodName + " не выполнена, acks = " + acks + " ; требования - " + rf);
         return new Response(Response.GATEWAY_TIMEOUT, Response.EMPTY);
     }
-    Response success(String responseName, int acks, byte[] body){
+
+    /**
+     * Шаблон, формирующий ответ на запрос при его удачном выполнении
+     *
+     * @param responseName имя запсроса, на который формируем ответ
+     * @param acks         количество ответивших реплик
+     * @param body         тело возвращаемого запроса
+     * @return ответ на полученный запрос
+     */
+    Response success(String responseName, int acks, byte[] body) {
         log.info("Операция " + methodName + " выполнена успешно в " + acks + " нодах; требования - " + rf);
         return new Response(responseName, body);
     }
